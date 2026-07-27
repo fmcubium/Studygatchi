@@ -385,6 +385,8 @@ This project uses GitHub Actions to run tests on backend endpoints. Whenever you
 * `build-addtl`
 
 `build` consists of tests that are required to pass for code to be submittable. By default this runs all tests with the `required` header, but *it is your responsibility to update this to run tests relevant to the feature you are working on*. 
-You can do this by going to `backend/quickstart/tests.py` and marking the relevant test class with the `@pytest.mark.required` decorator.
+You can do this by going to Actions -> Python application -> Run all workflows, where you will be given an input box to change the -m flag to the tags you want to test.
+
+Note that the -m flag uses boolean logic.
 
 `build-addtl` will run all the tests available in the testing suite, disregarding any test gating. It is not required to have all tests in `build-addtl` pass and `build-addtl` will be skipped on PRs.
