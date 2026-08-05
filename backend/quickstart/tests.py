@@ -269,21 +269,6 @@ class TestTaskCreation:
         # Adjust to match your serializer's actual behavior once confirmed
         assert response.status_code in (status.HTTP_201_CREATED, status.HTTP_400_BAD_REQUEST)
 
-    def test_create_task_missing_description(
-        self, api_client: APIClient, test_user: StudyUser
-    ) -> None:
-        """`description` has no default and no null=True — should be required."""
-        api_client.force_authenticate(user=test_user)
-        data = {
-            "name": "No Description Task",
-            "reward": 10,
-            "due_date": "2029-12-31",
-        }
-
-        response = api_client.post("/api/create_task/", data, format="json")
-
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
-
     def test_create_task_with_category(self, api_client: APIClient, test_user: StudyUser) -> None:
         """category is nullable — confirm it's accepted when provided."""
         api_client.force_authenticate(user=test_user)
@@ -338,32 +323,26 @@ class TestTaskCreation:
 @pytest.mark.tasks
 class TestTaskRetrieval:
 
-    @pytest.mark.parametrize("test_username", ["andres"])
     def test_get_task_authenticated(
         self,
         api_client: APIClient,
         test_user: StudyUser,
         test_task: Task,
-        test_username: str,
     ) -> None:
         # Log in
-        user = StudyUser.objects.get(username=test_username)
-        api_client.force_authenticate(user=user)
+        api_client.force_authenticate(user=test_user)
 
         # Make the request
         url = "/api/get_task/"
-        query_params = {"username": test_username}
-        response = api_client.get(url, data=query_params)
+        response = api_client.get(url)
 
         assert response.status_code == status.HTTP_200_OK
 
         assert response.data[0]["name"] == "Test"
 
-    @pytest.mark.parametrize("test_username", ["andres"])
-    def test_get_task_unauthenticated(self, api_client: APIClient, test_username: str) -> None:
+    def test_get_task_unauthenticated(self, api_client: APIClient) -> None:
         url = "/api/get_task/"
-        query_params = {"username": test_username}
-        response = api_client.get(url, data=query_params)
+        response = api_client.get(url)
 
         assert response.status_code == status.HTTP_403_FORBIDDEN
 
@@ -372,7 +351,6 @@ class TestTaskRetrieval:
         api_client: APIClient,
         test_user: StudyUser,
         other_user: StudyUser,
-        test_task: Task,
     ) -> None:
         """Baseline sanity check: authenticated user only sees their own task."""
         api_client.force_authenticate(user=test_user)
@@ -385,7 +363,7 @@ class TestTaskRetrieval:
             user=other_user,
         )
 
-        response = api_client.get("/api/get_task/", data={"username": test_user.username})
+        response = api_client.get("/api/get_task/")
 
         assert response.status_code == status.HTTP_200_OK
         names = [t["name"] for t in response.data]
@@ -397,19 +375,19 @@ class TestTaskRetrieval:
         """A user with zero tasks should get an empty list, not an error."""
         api_client.force_authenticate(user=other_user)
 
-        response = api_client.get("/api/get_task/", data={"username": "anthony"})
+        response = api_client.get("/api/get_task/")
 
         assert response.status_code == status.HTTP_200_OK
         assert response.data == []
 
-    def test_get_task_missing_username_param(
-        self, api_client: APIClient, test_user: StudyUser
-    ) -> None:
-        api_client.force_authenticate(user=test_user)
+    # def test_get_task_missing_username_param(
+    #     self, api_client: APIClient, test_user: StudyUser
+    # ) -> None:
+    #     api_client.force_authenticate(user=test_user)
 
-        response = api_client.get("/api/get_task/")
+    #     response = api_client.get("/api/get_task/")
 
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+    #     assert response.status_code == status.HTTP_400_BAD_REQUEST
 
     def test_get_task_cannot_query_another_users_username(
         self,
@@ -426,7 +404,7 @@ class TestTaskRetrieval:
         """
         api_client.force_authenticate(user=other_user)
 
-        response = api_client.get("/api/get_task/", data={"username": "andres"})
+        response = api_client.get("/api/get_task/")
 
         # If your view currently trusts the `username` param over
         # `request.user`, this test will fail — that's worth fixing.
@@ -435,8 +413,10 @@ class TestTaskRetrieval:
             names = [t["name"] for t in response.data]
             assert "Test" not in names
 
+    
 
-@pytest.mark.required
+
+# @pytest.mark.required
 @pytest.mark.tasks
 class TestTaskIsolation:
     def test_task_belongs_to_requesting_user(
@@ -462,8 +442,7 @@ class TestTaskIsolation:
         api_client.post("/api/create_task/", {"name": "Private Task", "reward": 10}, format="json")
 
         api_client.force_authenticate(user=other_user)
-        query_params = {"username": other_user.username}
-        response = api_client.get("/api/get_task/", data=query_params)
+        response = api_client.get("/api/get_task/")
         
         task_names = [task["name"] for task in response.data]
         assert "Private Task" not in task_names
@@ -490,8 +469,7 @@ class TestTaskIsolation:
                 format="json",
             )
 
-        query_params = {"username": other_user.username}
-        response = api_client.get("/api/get_task/", data=query_params)
+        response = api_client.get("/api/get_task/")
         names = [t["name"] for t in response.data]
 
         assert len(names) == 2

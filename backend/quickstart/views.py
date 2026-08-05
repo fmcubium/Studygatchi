@@ -31,15 +31,9 @@ def create_task(request: Request) -> Response:
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def get_task(request: Request) -> Response:
-    username = request.query_params.get("username")
-    if not username:
-        return Response({"error": "No username provided"}, status=status.HTTP_400_BAD_REQUEST)
-
     # look up user and react accordingly if they don't exist
     try:
-        user: StudyUser = StudyUser.objects.get(username=username)
-        tasks: QuerySet[Task] = Task.objects.filter(user=user)
-
+        tasks: QuerySet[Task] = Task.objects.filter(user=request.user)
         serializer = TaskSerializer(tasks, many=True)
 
         return Response(serializer.data, status=status.HTTP_200_OK)
