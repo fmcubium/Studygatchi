@@ -176,11 +176,7 @@ class TestTaskCreation:
 
     def test_create_task_response_shape(self, api_client: APIClient, test_user: StudyUser):
         api_client.force_authenticate(user=test_user)
-        data = {
-            "name": "Shape Test",
-            "reward": 20,
-            "due_date": "2029-12-31"
-        }
+        data = {"name": "Shape Test", "reward": 20, "due_date": "2029-12-31"}
 
         response = api_client.post("/api/create_task/", data, format="json")
 
@@ -222,7 +218,9 @@ class TestTaskCreation:
 
         assert response.status_code == status.HTTP_201_CREATED
 
-    def test_create_task_reward_as_string(self, api_client: APIClient, test_user: StudyUser) -> None:
+    def test_create_task_reward_as_string(
+        self, api_client: APIClient, test_user: StudyUser
+    ) -> None:
         """DRF often coerces numeric strings — confirm the actual behavior."""
         api_client.force_authenticate(user=test_user)
         data = {
@@ -322,7 +320,6 @@ class TestTaskCreation:
 @pytest.mark.required
 @pytest.mark.tasks
 class TestTaskRetrieval:
-
     def test_get_task_authenticated(
         self,
         api_client: APIClient,
@@ -624,7 +621,6 @@ class TestTaskIsolation:
 
         assert len(names) == 2
         assert all(name.startswith("Theirs") for name in names)
-
 
 
 # Test Graveyard for tests that get generated but aren't useful *yet*
