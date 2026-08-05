@@ -593,7 +593,7 @@ class TestTaskIsolation:
 
         api_client.force_authenticate(user=other_user)
         response = api_client.get("/api/get_task/")
-        
+
         task_names = [task["name"] for task in response.data]
         assert "Private Task" not in task_names
 
@@ -624,7 +624,7 @@ class TestTaskIsolation:
 
         assert len(names) == 2
         assert all(name.startswith("Theirs") for name in names)
-   
+
 
 
 # Test Graveyard for tests that get generated but aren't useful *yet*
