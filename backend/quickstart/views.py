@@ -33,6 +33,9 @@ def create_task(request: Request) -> Response:
 def get_task(request: Request) -> Response:
     # look up user and react accordingly if they don't exist
     try:
+        if not request.user.is_active:
+            return Response(status=status.HTTP_403_FORBIDDEN)
+
         tasks: QuerySet[Task] = Task.objects.filter(user=request.user)
         serializer = TaskSerializer(tasks, many=True)
 

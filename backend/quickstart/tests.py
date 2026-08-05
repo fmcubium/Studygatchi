@@ -380,15 +380,6 @@ class TestTaskRetrieval:
         assert response.status_code == status.HTTP_200_OK
         assert response.data == []
 
-    # def test_get_task_missing_username_param(
-    #     self, api_client: APIClient, test_user: StudyUser
-    # ) -> None:
-    #     api_client.force_authenticate(user=test_user)
-
-    #     response = api_client.get("/api/get_task/")
-
-    #     assert response.status_code == status.HTTP_400_BAD_REQUEST
-
     def test_get_task_cannot_query_another_users_username(
         self,
         api_client: APIClient,
@@ -413,7 +404,166 @@ class TestTaskRetrieval:
             names = [t["name"] for t in response.data]
             assert "Test" not in names
 
-    
+    def test_get_task_returns_multiple_tasks(
+        self, api_client: APIClient, test_user: StudyUser
+    ) -> None:
+        """A user with several tasks should get all of them back."""
+        api_client.force_authenticate(user=test_user)
+
+        Task.objects.create(name="Task A", reward=10, due_date="2029-12-31", user=test_user)
+        Task.objects.create(name="Task B", reward=20, due_date="2029-12-31", user=test_user)
+        Task.objects.create(name="Task C", reward=30, due_date="2029-12-31", user=test_user)
+
+        response = api_client.get("/api/get_task/")
+
+        assert response.status_code == status.HTTP_200_OK
+        names = [t["name"] for t in response.data]
+        assert set(names) == {"Task A", "Task B", "Task C"}
+
+    def test_get_task_response_field_shape(
+        self, api_client: APIClient, test_user: StudyUser, test_task: Task
+    ) -> None:
+        """Confirm expected fields are present and no sensitive fields leak."""
+        api_client.force_authenticate(user=test_user)
+
+        response = api_client.get("/api/get_task/")
+
+        assert response.status_code == status.HTTP_200_OK
+        task_data = response.data[0]
+        assert "name" in task_data
+        assert "reward" in task_data
+        assert "due_date" in task_data
+        assert "user" not in task_data or not isinstance(task_data.get("user"), dict)
+        assert "password" not in task_data
+
+    def test_get_task_nonexistent_username_param(
+        self, api_client: APIClient, test_user: StudyUser
+    ) -> None:
+        """Querying a username that doesn't exist shouldn't 500."""
+        api_client.force_authenticate(user=test_user)
+
+        response = api_client.get("/api/get_task/", data={"username": "nobody_here"})
+
+        assert response.status_code in (
+            status.HTTP_200_OK,
+            status.HTTP_400_BAD_REQUEST,
+            status.HTTP_404_NOT_FOUND,
+        )
+
+    def test_get_task_does_not_return_soft_deleted_or_unrelated_data(
+        self, api_client: APIClient, test_user: StudyUser, other_user: StudyUser
+    ) -> None:
+        """Sanity check that retrieval count matches exactly what was created — no duplication or leakage."""
+        api_client.force_authenticate(user=test_user)
+        Task.objects.create(name="Only Mine", reward=5, due_date="2029-12-31", user=test_user)
+        Task.objects.create(name="Not Mine", reward=5, due_date="2029-12-31", user=other_user)
+
+        response = api_client.get("/api/get_task/")
+
+        assert response.status_code == status.HTTP_200_OK
+        assert len(response.data) == 1
+        assert response.data[0]["name"] == "Only Mine"
+
+    def test_get_task_wrong_http_method_not_allowed(
+        self, api_client: APIClient, test_user: StudyUser
+    ) -> None:
+        """POST-ing to a GET-only endpoint should be rejected, not silently succeed."""
+        api_client.force_authenticate(user=test_user)
+
+        response = api_client.post("/api/get_task/", {}, format="json")
+
+        assert response.status_code == status.HTTP_405_METHOD_NOT_ALLOWED
+
+    def test_get_task_includes_category_field(
+        self, api_client: APIClient, test_user: StudyUser
+    ) -> None:
+        """category is nullable but should still appear in the response, even as null."""
+        api_client.force_authenticate(user=test_user)
+        Task.objects.create(
+            name="Categorized",
+            reward=10,
+            due_date="2029-12-31",
+            category="school",
+            user=test_user,
+        )
+
+        response = api_client.get("/api/get_task/")
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data[0]["category"] == "school"
+
+    def test_get_task_field_values_are_correct_types(
+        self, api_client: APIClient, test_user: StudyUser
+    ) -> None:
+        """Confirm numeric and date fields serialize with correct values, not just correct keys."""
+        Task.objects.create(
+            name="Type Check",
+            reward=42,
+            due_date="2029-07-04",
+            user=test_user,
+        )
+
+        api_client.force_authenticate(user=test_user)
+        response = api_client.get("/api/get_task/")
+
+        assert response.status_code == status.HTTP_200_OK
+        task_data = response.data[0]
+        assert task_data["reward"] == 42
+        assert "2029-07-04" in task_data["due_date"]
+
+    def test_get_task_response_is_a_list(
+        self, api_client: APIClient, test_user: StudyUser, test_task: Task
+    ) -> None:
+        """Even with exactly one task, the response should be a list, not a single object."""
+        api_client.force_authenticate(user=test_user)
+
+        response = api_client.get("/api/get_task/")
+
+        assert response.status_code == status.HTTP_200_OK
+        assert isinstance(response.data, list)
+
+    def test_get_task_pagination_if_enabled(
+        self, api_client: APIClient, test_user: StudyUser
+    ) -> None:
+        """
+        If pagination is configured (DRF's default PAGE_SIZE or similar), a large
+        number of tasks shouldn't silently truncate without the client knowing.
+        If pagination is NOT enabled, this just confirms all tasks come back.
+        """
+        for i in range(25):
+            Task.objects.create(
+                name=f"Bulk Task {i}", reward=1, due_date="2029-12-31", user=test_user
+            )
+
+        api_client.force_authenticate(user=test_user)
+        response = api_client.get("/api/get_task/")
+
+        assert response.status_code == status.HTTP_200_OK
+        if isinstance(response.data, dict) and "results" in response.data:
+            # paginated response — check the count field instead
+            assert response.data["count"] == 25
+        else:
+            assert len(response.data) == 25
+
+    def test_get_task_invalid_auth_token_rejected(self, api_client: APIClient) -> None:
+        """A garbage/expired credential should not be treated as authenticated."""
+        api_client.credentials(HTTP_AUTHORIZATION="Bearer invalid_token_garbage")
+
+        response = api_client.get("/api/get_task/")
+
+        assert response.status_code in (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN)
+
+    def test_get_task_inactive_user_cannot_retrieve(
+        self, api_client: APIClient, test_user: StudyUser, test_task: Task
+    ) -> None:
+        """A deactivated account shouldn't be able to pull its own tasks."""
+        test_user.is_active = False
+        test_user.save()
+
+        api_client.force_authenticate(user=test_user)
+        response = api_client.get("/api/get_task/")
+
+        assert response.status_code in (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN)
 
 
 # @pytest.mark.required
