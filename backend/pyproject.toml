@@ -91,5 +91,5 @@ python_classes = ["Test*", "*Test"]
 python_functions = ["test_*"]
 markers = [
     "required: required core tests for CI pipeline",
-    "smoke: quick sanity check tests",
+    "tasks: tests for adding/removing/editing tasks",
 ]

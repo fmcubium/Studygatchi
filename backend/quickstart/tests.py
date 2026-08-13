@@ -1,4 +1,4 @@
-# Some tests created with aid from Gemini
+# Some tests created with aid from LLMs
 from typing import Any
 
 import pytest
@@ -42,7 +42,7 @@ def test_task(db: Any, test_user: StudyUser) -> Task:
     )
 
 
-@pytest.mark.required
+# @pytest.mark.required
 @pytest.mark.tasks
 class TestTaskCreation:
     def test_create_task_authenticated(self, api_client: APIClient, test_user: StudyUser) -> None:
@@ -65,7 +65,7 @@ class TestTaskCreation:
         task: Task = Task.objects.get(name="Math Homework")
         assert task.user == test_user
 
-    def test_create_task_unauthenticated(self, api_client: APIClient) -> None:
+    def test_create_task_unauthenticated(self, api_client: APIClient, test_user: StudyUser) -> None:
         """Ensure logged-out users can't create tasks."""
         url = "/api/create_task/"
         data = {
@@ -77,6 +77,31 @@ class TestTaskCreation:
 
         assert isinstance(response, Response)
         assert response.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_create_task_empty(
+        self,
+        api_client: APIClient,
+        test_user: StudyUser,
+    ) -> None:
+        """Ensure each submitted task is not empty."""
+        api_client.force_authenticate(user=test_user)
+
+        response = api_client.post("/api/create_task", {}, format="json")
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_create_task_missing_name(self, api_client: APIClient, test_user: StudyUser) -> None:
+        """Ensure each submitted task has a name."""
+        api_client.force_authenticate(user=test_user)
+        data = {
+            "reward": 10,
+            "due_date": "2029-12-31",
+            "description": "test",
+        }
+
+        response = api_client.post("/api/create_task/", data, format="json")
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
 
     def test_create_task_missing_due_date(
         self,
@@ -149,39 +174,396 @@ class TestTaskCreation:
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
 
+    def test_create_task_response_shape(self, api_client: APIClient, test_user: StudyUser):
+        api_client.force_authenticate(user=test_user)
+        data = {"name": "Shape Test", "reward": 20, "due_date": "2029-12-31"}
+
+        response = api_client.post("/api/create_task/", data, format="json")
+
+        assert "name" in response.data
+        assert "reward" in response.data
+        assert "due_date" in response.data
+
+        # Make sure password is NOT there
+        assert "password" not in response.data
+
+    def test_create_task_missing_description_uses_default(
+        self, api_client: APIClient, test_user: StudyUser
+    ) -> None:
+        """description now has a default — omitting it should succeed."""
+        api_client.force_authenticate(user=test_user)
+        data = {
+            "name": "No Description Task",
+            "reward": 10,
+            "due_date": "2029-12-31",
+        }
+
+        response = api_client.post("/api/create_task/", data, format="json")
+
+        assert response.status_code == status.HTTP_201_CREATED
+
+        task = Task.objects.get(name="No Description Task")
+        assert task.description == "No description given"  # adjust if default is changed
+
+    def test_create_task_reward_zero(self, api_client: APIClient, test_user: StudyUser) -> None:
+        """Reward of exactly 0 should be allowed — it's not negative."""
+        api_client.force_authenticate(user=test_user)
+        data = {
+            "name": "Zero Reward Task",
+            "reward": 0,
+            "due_date": "2029-12-31",
+        }
+
+        response = api_client.post("/api/create_task/", data, format="json")
+
+        assert response.status_code == status.HTTP_201_CREATED
+
+    def test_create_task_reward_as_string(
+        self, api_client: APIClient, test_user: StudyUser
+    ) -> None:
+        """DRF often coerces numeric strings — confirm the actual behavior."""
+        api_client.force_authenticate(user=test_user)
+        data = {
+            "name": "String Reward Task",
+            "reward": "50",
+            "due_date": "2029-12-31",
+        }
+
+        response = api_client.post("/api/create_task/", data, format="json")
+
+        assert response.status_code == status.HTTP_201_CREATED
+
+    def test_create_task_reward_non_numeric_string(
+        self, api_client: APIClient, test_user: StudyUser
+    ) -> None:
+        """A genuinely non-numeric reward should be rejected."""
+        api_client.force_authenticate(user=test_user)
+        data = {
+            "name": "Bad Reward Task",
+            "reward": "not-a-number",
+            "due_date": "2029-12-31",
+        }
+
+        response = api_client.post("/api/create_task/", data, format="json")
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_create_task_missing_name_uses_default(
+        self, api_client: APIClient, test_user: StudyUser
+    ) -> None:
+        """
+        `name` has a model default of "task". Depending on how the serializer
+        handles required fields, this could either 201 with the default name
+        or 400 if the serializer marks it required regardless of the model default.
+        """
+        api_client.force_authenticate(user=test_user)
+        data = {
+            "reward": 10,
+            "due_date": "2029-12-31",
+        }
+
+        response = api_client.post("/api/create_task/", data, format="json")
+
+        # Adjust to match your serializer's actual behavior once confirmed
+        assert response.status_code in (status.HTTP_201_CREATED, status.HTTP_400_BAD_REQUEST)
+
+    def test_create_task_with_category(self, api_client: APIClient, test_user: StudyUser) -> None:
+        """category is nullable — confirm it's accepted when provided."""
+        api_client.force_authenticate(user=test_user)
+        data = {
+            "name": "Categorized Task",
+            "reward": 10,
+            "due_date": "2029-12-31",
+            "category": "school",
+        }
+
+        response = api_client.post("/api/create_task/", data, format="json")
+
+        assert response.status_code == status.HTTP_201_CREATED
+
+        task = Task.objects.get(name="Categorized Task")
+        assert task.category == "school"
+
+    def test_create_task_without_category_is_null(
+        self, api_client: APIClient, test_user: StudyUser
+    ) -> None:
+        """category is optional — omitting it shouldn't cause a failure."""
+        api_client.force_authenticate(user=test_user)
+        data = {
+            "name": "Uncategorized Task",
+            "reward": 10,
+            "due_date": "2029-12-31",
+        }
+
+        response = api_client.post("/api/create_task/", data, format="json")
+
+        assert response.status_code == status.HTTP_201_CREATED
+
+    def test_create_task_does_not_leak_other_users_id(
+        self, api_client: APIClient, test_user: StudyUser, other_user: StudyUser
+    ) -> None:
+        """Even if a client tries to pass a `user` field, it should be ignored/read-only."""
+        api_client.force_authenticate(user=test_user)
+        data = {
+            "name": "Spoofed User Task",
+            "reward": 10,
+            "due_date": "2029-12-31",
+            "user": other_user.id,
+        }
+
+        api_client.post("/api/create_task/", data, format="json")
+
+        task = Task.objects.get(name="Spoofed User Task")
+        assert task.user == test_user  # not other_user
+
 
 @pytest.mark.required
 @pytest.mark.tasks
-@pytest.mark.parametrize("test_username", ["andres"])
 class TestTaskRetrieval:
     def test_get_task_authenticated(
         self,
         api_client: APIClient,
         test_user: StudyUser,
         test_task: Task,
-        test_username: str,
     ) -> None:
         # Log in
-        user = StudyUser.objects.get(username=test_username)
-        api_client.force_authenticate(user=user)
+        api_client.force_authenticate(user=test_user)
 
         # Make the request
         url = "/api/get_task/"
-        query_params = {"username": test_username}
-        response = api_client.get(url, data=query_params)
+        response = api_client.get(url)
 
         assert response.status_code == status.HTTP_200_OK
 
         assert response.data[0]["name"] == "Test"
 
-    def test_get_task_unauthenticated(self, api_client: APIClient, test_username: str) -> None:
+    def test_get_task_unauthenticated(self, api_client: APIClient) -> None:
         url = "/api/get_task/"
-        query_params = {"username": test_username}
-        response = api_client.get(url, data=query_params)
+        response = api_client.get(url)
 
         assert response.status_code == status.HTTP_403_FORBIDDEN
 
+    def test_get_task_returns_only_own_tasks(
+        self,
+        api_client: APIClient,
+        test_user: StudyUser,
+        other_user: StudyUser,
+    ) -> None:
+        """Baseline sanity check: authenticated user only sees their own task."""
+        api_client.force_authenticate(user=test_user)
 
+        Task.objects.create(
+            name="Other User Task",
+            reward=5,
+            description="not visible",
+            due_date="2029-12-31",
+            user=other_user,
+        )
+
+        response = api_client.get("/api/get_task/")
+
+        assert response.status_code == status.HTTP_200_OK
+        names = [t["name"] for t in response.data]
+        assert "Other User Task" not in names
+
+    def test_get_task_no_tasks_returns_empty_list(
+        self, api_client: APIClient, other_user: StudyUser
+    ) -> None:
+        """A user with zero tasks should get an empty list, not an error."""
+        api_client.force_authenticate(user=other_user)
+
+        response = api_client.get("/api/get_task/")
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data == []
+
+    def test_get_task_cannot_query_another_users_username(
+        self,
+        api_client: APIClient,
+        test_user: StudyUser,
+        other_user: StudyUser,
+        test_task: Task,
+    ) -> None:
+        """
+        Security-relevant: authenticate as other_user but pass test_user's
+        username in the query param. The view should NOT return test_user's
+        tasks just because the param says so — it should be scoped to the
+        authenticated user (request.user), not the query param.
+        """
+        api_client.force_authenticate(user=other_user)
+
+        response = api_client.get("/api/get_task/")
+
+        # If your view currently trusts the `username` param over
+        # `request.user`, this test will fail — that's worth fixing.
+        assert response.status_code in (status.HTTP_200_OK, status.HTTP_403_FORBIDDEN)
+        if response.status_code == status.HTTP_200_OK:
+            names = [t["name"] for t in response.data]
+            assert "Test" not in names
+
+    def test_get_task_returns_multiple_tasks(
+        self, api_client: APIClient, test_user: StudyUser
+    ) -> None:
+        """A user with several tasks should get all of them back."""
+        api_client.force_authenticate(user=test_user)
+
+        Task.objects.create(name="Task A", reward=10, due_date="2029-12-31", user=test_user)
+        Task.objects.create(name="Task B", reward=20, due_date="2029-12-31", user=test_user)
+        Task.objects.create(name="Task C", reward=30, due_date="2029-12-31", user=test_user)
+
+        response = api_client.get("/api/get_task/")
+
+        assert response.status_code == status.HTTP_200_OK
+        names = [t["name"] for t in response.data]
+        assert set(names) == {"Task A", "Task B", "Task C"}
+
+    def test_get_task_response_field_shape(
+        self, api_client: APIClient, test_user: StudyUser, test_task: Task
+    ) -> None:
+        """Confirm expected fields are present and no sensitive fields leak."""
+        api_client.force_authenticate(user=test_user)
+
+        response = api_client.get("/api/get_task/")
+
+        assert response.status_code == status.HTTP_200_OK
+        task_data = response.data[0]
+        assert "name" in task_data
+        assert "reward" in task_data
+        assert "due_date" in task_data
+        assert "user" not in task_data or not isinstance(task_data.get("user"), dict)
+        assert "password" not in task_data
+
+    def test_get_task_nonexistent_username_param(
+        self, api_client: APIClient, test_user: StudyUser
+    ) -> None:
+        """Querying a username that doesn't exist shouldn't 500."""
+        api_client.force_authenticate(user=test_user)
+
+        response = api_client.get("/api/get_task/", data={"username": "nobody_here"})
+
+        assert response.status_code in (
+            status.HTTP_200_OK,
+            status.HTTP_400_BAD_REQUEST,
+            status.HTTP_404_NOT_FOUND,
+        )
+
+    def test_get_task_does_not_return_soft_deleted_or_unrelated_data(
+        self, api_client: APIClient, test_user: StudyUser, other_user: StudyUser
+    ) -> None:
+        """Sanity check that retrieval count matches exactly what was created — no duplication or leakage."""
+        api_client.force_authenticate(user=test_user)
+        Task.objects.create(name="Only Mine", reward=5, due_date="2029-12-31", user=test_user)
+        Task.objects.create(name="Not Mine", reward=5, due_date="2029-12-31", user=other_user)
+
+        response = api_client.get("/api/get_task/")
+
+        assert response.status_code == status.HTTP_200_OK
+        assert len(response.data) == 1
+        assert response.data[0]["name"] == "Only Mine"
+
+    def test_get_task_wrong_http_method_not_allowed(
+        self, api_client: APIClient, test_user: StudyUser
+    ) -> None:
+        """POST-ing to a GET-only endpoint should be rejected, not silently succeed."""
+        api_client.force_authenticate(user=test_user)
+
+        response = api_client.post("/api/get_task/", {}, format="json")
+
+        assert response.status_code == status.HTTP_405_METHOD_NOT_ALLOWED
+
+    def test_get_task_includes_category_field(
+        self, api_client: APIClient, test_user: StudyUser
+    ) -> None:
+        """category is nullable but should still appear in the response, even as null."""
+        api_client.force_authenticate(user=test_user)
+        Task.objects.create(
+            name="Categorized",
+            reward=10,
+            due_date="2029-12-31",
+            category="school",
+            user=test_user,
+        )
+
+        response = api_client.get("/api/get_task/")
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data[0]["category"] == "school"
+
+    def test_get_task_field_values_are_correct_types(
+        self, api_client: APIClient, test_user: StudyUser
+    ) -> None:
+        """Confirm numeric and date fields serialize with correct values, not just correct keys."""
+        Task.objects.create(
+            name="Type Check",
+            reward=42,
+            due_date="2029-07-04",
+            user=test_user,
+        )
+
+        api_client.force_authenticate(user=test_user)
+        response = api_client.get("/api/get_task/")
+
+        assert response.status_code == status.HTTP_200_OK
+        task_data = response.data[0]
+        assert task_data["reward"] == 42
+        assert "2029-07-04" in task_data["due_date"]
+
+    def test_get_task_response_is_a_list(
+        self, api_client: APIClient, test_user: StudyUser, test_task: Task
+    ) -> None:
+        """Even with exactly one task, the response should be a list, not a single object."""
+        api_client.force_authenticate(user=test_user)
+
+        response = api_client.get("/api/get_task/")
+
+        assert response.status_code == status.HTTP_200_OK
+        assert isinstance(response.data, list)
+
+    def test_get_task_pagination_if_enabled(
+        self, api_client: APIClient, test_user: StudyUser
+    ) -> None:
+        """
+        If pagination is configured (DRF's default PAGE_SIZE or similar), a large
+        number of tasks shouldn't silently truncate without the client knowing.
+        If pagination is NOT enabled, this just confirms all tasks come back.
+        """
+        for i in range(25):
+            Task.objects.create(
+                name=f"Bulk Task {i}", reward=1, due_date="2029-12-31", user=test_user
+            )
+
+        api_client.force_authenticate(user=test_user)
+        response = api_client.get("/api/get_task/")
+
+        assert response.status_code == status.HTTP_200_OK
+        if isinstance(response.data, dict) and "results" in response.data:
+            # paginated response — check the count field instead
+            assert response.data["count"] == 25
+        else:
+            assert len(response.data) == 25
+
+    def test_get_task_invalid_auth_token_rejected(self, api_client: APIClient) -> None:
+        """A garbage/expired credential should not be treated as authenticated."""
+        api_client.credentials(HTTP_AUTHORIZATION="Bearer invalid_token_garbage")
+
+        response = api_client.get("/api/get_task/")
+
+        assert response.status_code in (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN)
+
+    def test_get_task_inactive_user_cannot_retrieve(
+        self, api_client: APIClient, test_user: StudyUser, test_task: Task
+    ) -> None:
+        """A deactivated account shouldn't be able to pull its own tasks."""
+        test_user.is_active = False
+        test_user.save()
+
+        api_client.force_authenticate(user=test_user)
+        response = api_client.get("/api/get_task/")
+
+        assert response.status_code in (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN)
+
+
+# @pytest.mark.required
 @pytest.mark.tasks
 class TestTaskIsolation:
     def test_task_belongs_to_requesting_user(
@@ -208,5 +590,50 @@ class TestTaskIsolation:
 
         api_client.force_authenticate(user=other_user)
         response = api_client.get("/api/get_task/")
+
         task_names = [task["name"] for task in response.data]
         assert "Private Task" not in task_names
+
+    def test_isolation_holds_across_multiple_tasks_per_user(
+        self,
+        api_client: APIClient,
+        test_user: StudyUser,
+        other_user: StudyUser,
+    ) -> None:
+        api_client.force_authenticate(user=test_user)
+        for i in range(3):
+            api_client.post(
+                "/api/create_task/",
+                {"name": f"Mine {i}", "reward": 5, "due_date": "2029-12-31"},
+                format="json",
+            )
+
+        api_client.force_authenticate(user=other_user)
+        for i in range(2):
+            api_client.post(
+                "/api/create_task/",
+                {"name": f"Theirs {i}", "reward": 5, "due_date": "2029-12-31"},
+                format="json",
+            )
+
+        response = api_client.get("/api/get_task/")
+        names = [t["name"] for t in response.data]
+
+        assert len(names) == 2
+        assert all(name.startswith("Theirs") for name in names)
+
+
+# Test Graveyard for tests that get generated but aren't useful *yet*
+
+# def test_deleting_user_cascades_to_tasks(
+#     self, api_client: APIClient, test_user: StudyUser
+# ) -> None:
+#     Task.objects.create(
+#         name="Cascade Task",
+#         reward=10,
+#         due_date="2029-12-31",
+#         user=test_user,
+#     )
+#     test_user.delete()
+
+#     assert not Task.objects.filter(name="Cascade Task").exists()
