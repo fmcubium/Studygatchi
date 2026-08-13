@@ -49,4 +49,9 @@ class TaskSerializer(serializers.HyperlinkedModelSerializer):
     def validate_reward(self, value: int) -> int:
         if value < 0:
             raise serializers.ValidationError("Reward cannot be negative")
+
+        # Reward moderation will go here, for now we can have basic moderation and set a limit (like $100)
+        if value > 100:
+            raise serializers.ValidationError("Reward exceeds permitted amount")
+
         return value

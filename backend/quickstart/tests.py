@@ -37,12 +37,12 @@ def test_task(db: Any, test_user: StudyUser) -> Task:
         name="Test",
         reward=50,
         description="Make sure this works",
-        due_date="2026-12-31",
+        due_date="2026-12-31T00:00:00Z",
         user=test_user,
     )
 
 
-# @pytest.mark.required
+@pytest.mark.required
 @pytest.mark.tasks
 class TestTaskCreation:
     def test_create_task_authenticated(self, api_client: APIClient, test_user: StudyUser) -> None:
@@ -55,7 +55,7 @@ class TestTaskCreation:
             "name": "Math Homework",
             "reward": 50,
             "description": "Finish algebra 1",
-            "due_date": "2029-12-31",
+            "due_date": "2029-12-31T00:00:00Z",
         }
         response = api_client.post(url, data, format="json")
 
@@ -70,7 +70,7 @@ class TestTaskCreation:
         url = "/api/create_task/"
         data = {
             "name": "Ghost Task",
-            "due_date": "2029-12-31",
+            "due_date": "2029-12-31T00:00:00Z",
         }
 
         response = api_client.post(url, data, format="json")
@@ -86,7 +86,7 @@ class TestTaskCreation:
         """Ensure each submitted task is not empty."""
         api_client.force_authenticate(user=test_user)
 
-        response = api_client.post("/api/create_task", {}, format="json")
+        response = api_client.post("/api/create_task/", {}, format="json")
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
 
@@ -95,7 +95,7 @@ class TestTaskCreation:
         api_client.force_authenticate(user=test_user)
         data = {
             "reward": 10,
-            "due_date": "2029-12-31",
+            "due_date": "2029-12-31T00:00:00Z",
             "description": "test",
         }
 
@@ -141,7 +141,7 @@ class TestTaskCreation:
         data = {
             "name": "Negative Task",
             "reward": -100,
-            "due_date": "2029-12-31",
+            "due_date": "2029-12-31T00:00:00Z",
         }
 
         response = api_client.post("/api/create_task/", data, format="json")
@@ -153,7 +153,7 @@ class TestTaskCreation:
         data = {
             "name": "Positive Task",
             "reward": 100,
-            "due_date": "2029-12-31",
+            "due_date": "2029-12-31T00:00:00Z",
         }
 
         response = api_client.post("/api/create_task/", data, format="json")
@@ -167,7 +167,7 @@ class TestTaskCreation:
         data = {
             "name": "Late Task",
             "reward": 10,
-            "due_date": "2000-01-01",
+            "due_date": "2000-01-01T00:00:00Z",
         }
 
         response = api_client.post("/api/create_task/", data, format="json")
@@ -176,7 +176,7 @@ class TestTaskCreation:
 
     def test_create_task_response_shape(self, api_client: APIClient, test_user: StudyUser):
         api_client.force_authenticate(user=test_user)
-        data = {"name": "Shape Test", "reward": 20, "due_date": "2029-12-31"}
+        data = {"name": "Shape Test", "reward": 20, "due_date": "2029-12-31T00:00:00Z"}
 
         response = api_client.post("/api/create_task/", data, format="json")
 
@@ -195,7 +195,7 @@ class TestTaskCreation:
         data = {
             "name": "No Description Task",
             "reward": 10,
-            "due_date": "2029-12-31",
+            "due_date": "2029-12-31T00:00:00Z",
         }
 
         response = api_client.post("/api/create_task/", data, format="json")
@@ -211,12 +211,26 @@ class TestTaskCreation:
         data = {
             "name": "Zero Reward Task",
             "reward": 0,
-            "due_date": "2029-12-31",
+            "due_date": "2029-12-31T00:00:00Z",
         }
 
         response = api_client.post("/api/create_task/", data, format="json")
 
         assert response.status_code == status.HTTP_201_CREATED
+
+    def test_create_task_excessive_reward(self, api_client: APIClient, test_user: StudyUser) -> None:
+        """A reward higher than the set limit should fail our current basic moderation"""
+        # The value in this test is not 101 because this limit is subject to change
+        api_client.force_authenticate(user=test_user)
+        data = {
+            "name": "Money Farming Task",
+            "reward": 10000000000,
+            "due_date": "2029-12-31T00:00:00Z",
+        }
+
+        response = api_client.post("/api/create_task/", data, format="json")
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
 
     def test_create_task_reward_as_string(
         self, api_client: APIClient, test_user: StudyUser
@@ -226,7 +240,7 @@ class TestTaskCreation:
         data = {
             "name": "String Reward Task",
             "reward": "50",
-            "due_date": "2029-12-31",
+            "due_date": "2029-12-31T00:00:00Z",
         }
 
         response = api_client.post("/api/create_task/", data, format="json")
@@ -241,7 +255,7 @@ class TestTaskCreation:
         data = {
             "name": "Bad Reward Task",
             "reward": "not-a-number",
-            "due_date": "2029-12-31",
+            "due_date": "2029-12-31T00:00:00Z",
         }
 
         response = api_client.post("/api/create_task/", data, format="json")
@@ -259,7 +273,7 @@ class TestTaskCreation:
         api_client.force_authenticate(user=test_user)
         data = {
             "reward": 10,
-            "due_date": "2029-12-31",
+            "due_date": "2029-12-31T00:00:00Z",
         }
 
         response = api_client.post("/api/create_task/", data, format="json")
@@ -273,7 +287,7 @@ class TestTaskCreation:
         data = {
             "name": "Categorized Task",
             "reward": 10,
-            "due_date": "2029-12-31",
+            "due_date": "2029-12-31T00:00:00Z",
             "category": "school",
         }
 
@@ -292,7 +306,7 @@ class TestTaskCreation:
         data = {
             "name": "Uncategorized Task",
             "reward": 10,
-            "due_date": "2029-12-31",
+            "due_date": "2029-12-31T00:00:00Z",
         }
 
         response = api_client.post("/api/create_task/", data, format="json")
@@ -307,7 +321,7 @@ class TestTaskCreation:
         data = {
             "name": "Spoofed User Task",
             "reward": 10,
-            "due_date": "2029-12-31",
+            "due_date": "2029-12-31T00:00:00Z",
             "user": other_user.id,
         }
 
@@ -356,7 +370,7 @@ class TestTaskRetrieval:
             name="Other User Task",
             reward=5,
             description="not visible",
-            due_date="2029-12-31",
+            due_date="2029-12-31T00:00:00Z",
             user=other_user,
         )
 
@@ -407,9 +421,9 @@ class TestTaskRetrieval:
         """A user with several tasks should get all of them back."""
         api_client.force_authenticate(user=test_user)
 
-        Task.objects.create(name="Task A", reward=10, due_date="2029-12-31", user=test_user)
-        Task.objects.create(name="Task B", reward=20, due_date="2029-12-31", user=test_user)
-        Task.objects.create(name="Task C", reward=30, due_date="2029-12-31", user=test_user)
+        Task.objects.create(name="Task A", reward=10, due_date="2029-12-31T00:00:00Z", user=test_user)
+        Task.objects.create(name="Task B", reward=20, due_date="2029-12-31T00:00:00Z", user=test_user)
+        Task.objects.create(name="Task C", reward=30, due_date="2029-12-31T00:00:00Z", user=test_user)
 
         response = api_client.get("/api/get_task/")
 
@@ -452,8 +466,8 @@ class TestTaskRetrieval:
     ) -> None:
         """Sanity check that retrieval count matches exactly what was created — no duplication or leakage."""
         api_client.force_authenticate(user=test_user)
-        Task.objects.create(name="Only Mine", reward=5, due_date="2029-12-31", user=test_user)
-        Task.objects.create(name="Not Mine", reward=5, due_date="2029-12-31", user=other_user)
+        Task.objects.create(name="Only Mine", reward=5, due_date="2029-12-31T00:00:00Z", user=test_user)
+        Task.objects.create(name="Not Mine", reward=5, due_date="2029-12-31T00:00:00Z", user=other_user)
 
         response = api_client.get("/api/get_task/")
 
@@ -479,7 +493,7 @@ class TestTaskRetrieval:
         Task.objects.create(
             name="Categorized",
             reward=10,
-            due_date="2029-12-31",
+            due_date="2029-12-31T00:00:00Z",
             category="school",
             user=test_user,
         )
@@ -496,7 +510,7 @@ class TestTaskRetrieval:
         Task.objects.create(
             name="Type Check",
             reward=42,
-            due_date="2029-07-04",
+            due_date="2029-07-04T00:00:00Z",
             user=test_user,
         )
 
@@ -506,7 +520,7 @@ class TestTaskRetrieval:
         assert response.status_code == status.HTTP_200_OK
         task_data = response.data[0]
         assert task_data["reward"] == 42
-        assert "2029-07-04" in task_data["due_date"]
+        assert "2029-07-04T00:00:00Z" in task_data["due_date"]
 
     def test_get_task_response_is_a_list(
         self, api_client: APIClient, test_user: StudyUser, test_task: Task
@@ -529,7 +543,7 @@ class TestTaskRetrieval:
         """
         for i in range(25):
             Task.objects.create(
-                name=f"Bulk Task {i}", reward=1, due_date="2029-12-31", user=test_user
+                name=f"Bulk Task {i}", reward=1, due_date="2029-12-31T00:00:00Z", user=test_user
             )
 
         api_client.force_authenticate(user=test_user)
@@ -604,7 +618,7 @@ class TestTaskIsolation:
         for i in range(3):
             api_client.post(
                 "/api/create_task/",
-                {"name": f"Mine {i}", "reward": 5, "due_date": "2029-12-31"},
+                {"name": f"Mine {i}", "reward": 5, "due_date": "2029-12-31T00:00:00Z"},
                 format="json",
             )
 
@@ -612,7 +626,7 @@ class TestTaskIsolation:
         for i in range(2):
             api_client.post(
                 "/api/create_task/",
-                {"name": f"Theirs {i}", "reward": 5, "due_date": "2029-12-31"},
+                {"name": f"Theirs {i}", "reward": 5, "due_date": "2029-12-31T00:00:00Z"},
                 format="json",
             )
 
@@ -631,7 +645,7 @@ class TestTaskIsolation:
 #     Task.objects.create(
 #         name="Cascade Task",
 #         reward=10,
-#         due_date="2029-12-31",
+#         due_date="2029-12-31T00:00:00Z",
 #         user=test_user,
 #     )
 #     test_user.delete()
