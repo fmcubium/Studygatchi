@@ -218,7 +218,9 @@ class TestTaskCreation:
 
         assert response.status_code == status.HTTP_201_CREATED
 
-    def test_create_task_excessive_reward(self, api_client: APIClient, test_user: StudyUser) -> None:
+    def test_create_task_excessive_reward(
+        self, api_client: APIClient, test_user: StudyUser
+    ) -> None:
         """A reward higher than the set limit should fail our current basic moderation"""
         # The value in this test is not 101 because this limit is subject to change
         api_client.force_authenticate(user=test_user)
@@ -421,9 +423,15 @@ class TestTaskRetrieval:
         """A user with several tasks should get all of them back."""
         api_client.force_authenticate(user=test_user)
 
-        Task.objects.create(name="Task A", reward=10, due_date="2029-12-31T00:00:00Z", user=test_user)
-        Task.objects.create(name="Task B", reward=20, due_date="2029-12-31T00:00:00Z", user=test_user)
-        Task.objects.create(name="Task C", reward=30, due_date="2029-12-31T00:00:00Z", user=test_user)
+        Task.objects.create(
+            name="Task A", reward=10, due_date="2029-12-31T00:00:00Z", user=test_user
+        )
+        Task.objects.create(
+            name="Task B", reward=20, due_date="2029-12-31T00:00:00Z", user=test_user
+        )
+        Task.objects.create(
+            name="Task C", reward=30, due_date="2029-12-31T00:00:00Z", user=test_user
+        )
 
         response = api_client.get("/api/get_task/")
 
@@ -466,8 +474,12 @@ class TestTaskRetrieval:
     ) -> None:
         """Sanity check that retrieval count matches exactly what was created — no duplication or leakage."""
         api_client.force_authenticate(user=test_user)
-        Task.objects.create(name="Only Mine", reward=5, due_date="2029-12-31T00:00:00Z", user=test_user)
-        Task.objects.create(name="Not Mine", reward=5, due_date="2029-12-31T00:00:00Z", user=other_user)
+        Task.objects.create(
+            name="Only Mine", reward=5, due_date="2029-12-31T00:00:00Z", user=test_user
+        )
+        Task.objects.create(
+            name="Not Mine", reward=5, due_date="2029-12-31T00:00:00Z", user=other_user
+        )
 
         response = api_client.get("/api/get_task/")
 
