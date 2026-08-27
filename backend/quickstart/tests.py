@@ -652,8 +652,12 @@ class TestTaskIsolation:
         self, api_client: APIClient, test_user: StudyUser, other_user: StudyUser
     ) -> None:
         """Task names aren't globally unique — two users can each have a task with the same name."""
-        Task.objects.create(name="Homework", reward=10, due_date="2029-12-31", user=test_user)
-        Task.objects.create(name="Homework", reward=20, due_date="2029-12-31", user=other_user)
+        Task.objects.create(
+            name="Homework", reward=10, due_date="2029-12-31T00:00:00Z", user=test_user
+        )
+        Task.objects.create(
+            name="Homework", reward=20, due_date="2029-12-31T00:00:00Z", user=other_user
+        )
 
         assert Task.objects.filter(name="Homework").count() == 2
         mine = Task.objects.get(name="Homework", user=test_user)
@@ -666,11 +670,11 @@ class TestTaskIsolation:
     ) -> None:
         """Sequential/guessable IDs shouldn't let one user fetch another's specific task."""
         task = Task.objects.create(
-            name="Secret Task", reward=10, due_date="2029-12-31", user=other_user
+            name="Secret Task", reward=10, due_date="2029-12-31T00:00:00Z", user=other_user
         )
 
         api_client.force_authenticate(user=test_user)
-        response = api_client.get(f"/api/get_task/", data={"id": task.id})
+        response = api_client.get("/api/get_task/", data={"id": task.id})
 
         assert response.status_code in (status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND)
 
@@ -681,7 +685,7 @@ class TestTaskIsolation:
         api_client.force_authenticate(user=test_user)
         api_client.post(
             "/api/create_task/",
-            {"name": "First User Task", "reward": 5, "due_date": "2029-12-31"},
+            {"name": "First User Task", "reward": 5, "due_date": "2029-12-31T00:00:00Z"},
             format="json",
         )
 
@@ -695,12 +699,14 @@ class TestTaskIsolation:
         self, api_client: APIClient, test_user: StudyUser, other_user: StudyUser
     ) -> None:
         """Creating a task for one user shouldn't be influenced by or leak another user's existing tasks."""
-        Task.objects.create(name="Existing", reward=10, due_date="2029-12-31", user=other_user)
+        Task.objects.create(
+            name="Existing", reward=10, due_date="2029-12-31T00:00:00Z", user=other_user
+        )
 
         api_client.force_authenticate(user=test_user)
         response = api_client.post(
             "/api/create_task/",
-            {"name": "New Task", "reward": 5, "due_date": "2029-12-31"},
+            {"name": "New Task", "reward": 5, "due_date": "2029-12-31T00:00:00Z"},
             format="json",
         )
 
@@ -712,10 +718,18 @@ class TestTaskIsolation:
         self, api_client: APIClient, test_user: StudyUser, other_user: StudyUser
     ) -> None:
         """Total tasks in the DB across all users shouldn't affect what one user sees."""
-        Task.objects.create(name="Mine 1", reward=5, due_date="2029-12-31", user=test_user)
-        Task.objects.create(name="Theirs 1", reward=5, due_date="2029-12-31", user=other_user)
-        Task.objects.create(name="Theirs 2", reward=5, due_date="2029-12-31", user=other_user)
-        Task.objects.create(name="Theirs 3", reward=5, due_date="2029-12-31", user=other_user)
+        Task.objects.create(
+            name="Mine 1", reward=5, due_date="2029-12-31T00:00:00Z", user=test_user
+        )
+        Task.objects.create(
+            name="Theirs 1", reward=5, due_date="2029-12-31T00:00:00Z", user=other_user
+        )
+        Task.objects.create(
+            name="Theirs 2", reward=5, due_date="2029-12-31T00:00:00Z", user=other_user
+        )
+        Task.objects.create(
+            name="Theirs 3", reward=5, due_date="2029-12-31T00:00:00Z", user=other_user
+        )
 
         api_client.force_authenticate(user=test_user)
         response = api_client.get("/api/get_task/")
@@ -732,7 +746,7 @@ class TestTaskIsolation:
         for i in range(10):
             api_client.post(
                 "/api/create_task/",
-                {"name": f"Task {i}", "reward": 1, "due_date": "2029-12-31"},
+                {"name": f"Task {i}", "reward": 1, "due_date": "2029-12-31T00:00:00Z"},
                 format="json",
             )
 
@@ -746,8 +760,10 @@ class TestTaskIsolation:
         self, api_client: APIClient, test_user: StudyUser, other_user: StudyUser
     ) -> None:
         """Confirm reward/money fields on tasks aren't cross-contaminated between users' tasks."""
-        Task.objects.create(name="Cheap", reward=1, due_date="2029-12-31", user=test_user)
-        Task.objects.create(name="Expensive", reward=1000, due_date="2029-12-31", user=other_user)
+        Task.objects.create(name="Cheap", reward=1, due_date="2029-12-31T00:00:00Z", user=test_user)
+        Task.objects.create(
+            name="Expensive", reward=1000, due_date="2029-12-31T00:00:00Z", user=other_user
+        )
 
         api_client.force_authenticate(user=test_user)
         response = api_client.get("/api/get_task/")
@@ -762,12 +778,16 @@ class TestTaskIsolation:
         """Create tasks interleaved between two users, confirm isolation without relying on IDs."""
         api_client.force_authenticate(user=test_user)
         api_client.post(
-            "/api/create_task/", {"name": "A", "reward": 1, "due_date": "2029-12-31"}, format="json"
+            "/api/create_task/",
+            {"name": "A", "reward": 1, "due_date": "2029-12-31T00:00:00Z"},
+            format="json",
         )
 
         api_client.force_authenticate(user=other_user)
         api_client.post(
-            "/api/create_task/", {"name": "B", "reward": 1, "due_date": "2029-12-31"}, format="json"
+            "/api/create_task/",
+            {"name": "B", "reward": 1, "due_date": "2029-12-31T00:00:00Z"},
+            format="json",
         )
 
         api_client.force_authenticate(user=test_user)
