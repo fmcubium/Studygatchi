@@ -648,6 +648,135 @@ class TestTaskIsolation:
         assert len(names) == 2
         assert all(name.startswith("Theirs") for name in names)
 
+    def test_same_task_name_allowed_across_different_users(
+        self, api_client: APIClient, test_user: StudyUser, other_user: StudyUser
+    ) -> None:
+        """Task names aren't globally unique — two users can each have a task with the same name."""
+        Task.objects.create(name="Homework", reward=10, due_date="2029-12-31", user=test_user)
+        Task.objects.create(name="Homework", reward=20, due_date="2029-12-31", user=other_user)
+
+        assert Task.objects.filter(name="Homework").count() == 2
+        mine = Task.objects.get(name="Homework", user=test_user)
+        theirs = Task.objects.get(name="Homework", user=other_user)
+        assert mine.id != theirs.id
+        assert mine.reward != theirs.reward
+
+    def test_user_cannot_access_task_by_guessing_id(
+        self, api_client: APIClient, test_user: StudyUser, other_user: StudyUser
+    ) -> None:
+        """Sequential/guessable IDs shouldn't let one user fetch another's specific task."""
+        task = Task.objects.create(
+            name="Secret Task", reward=10, due_date="2029-12-31", user=other_user
+        )
+
+        api_client.force_authenticate(user=test_user)
+        response = api_client.get(f"/api/get_task/", data={"id": task.id})
+
+        assert response.status_code in (status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND)
+
+    def test_isolation_holds_after_switching_authenticated_user_mid_session(
+        self, api_client: APIClient, test_user: StudyUser, other_user: StudyUser
+    ) -> None:
+        """Re-authenticating as a different user on the same client shouldn't leak the previous user's tasks."""
+        api_client.force_authenticate(user=test_user)
+        api_client.post(
+            "/api/create_task/",
+            {"name": "First User Task", "reward": 5, "due_date": "2029-12-31"},
+            format="json",
+        )
+
+        api_client.force_authenticate(user=other_user)
+        response = api_client.get("/api/get_task/")
+
+        names = [t["name"] for t in response.data]
+        assert "First User Task" not in names
+
+    def test_create_task_does_not_expose_other_users_task_count(
+        self, api_client: APIClient, test_user: StudyUser, other_user: StudyUser
+    ) -> None:
+        """Creating a task for one user shouldn't be influenced by or leak another user's existing tasks."""
+        Task.objects.create(name="Existing", reward=10, due_date="2029-12-31", user=other_user)
+
+        api_client.force_authenticate(user=test_user)
+        response = api_client.post(
+            "/api/create_task/",
+            {"name": "New Task", "reward": 5, "due_date": "2029-12-31"},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert Task.objects.filter(user=test_user).count() == 1
+        assert Task.objects.filter(user=other_user).count() == 1
+
+    def test_get_task_count_matches_only_authenticated_users_tasks(
+        self, api_client: APIClient, test_user: StudyUser, other_user: StudyUser
+    ) -> None:
+        """Total tasks in the DB across all users shouldn't affect what one user sees."""
+        Task.objects.create(name="Mine 1", reward=5, due_date="2029-12-31", user=test_user)
+        Task.objects.create(name="Theirs 1", reward=5, due_date="2029-12-31", user=other_user)
+        Task.objects.create(name="Theirs 2", reward=5, due_date="2029-12-31", user=other_user)
+        Task.objects.create(name="Theirs 3", reward=5, due_date="2029-12-31", user=other_user)
+
+        api_client.force_authenticate(user=test_user)
+        response = api_client.get("/api/get_task/")
+
+        assert response.status_code == status.HTTP_200_OK
+        assert Task.objects.count() == 4  # confirms all 4 exist in the DB
+        assert len(response.data) == 1  # but only 1 is visible to test_user
+
+    def test_creating_many_tasks_for_one_user_does_not_appear_for_another(
+        self, api_client: APIClient, test_user: StudyUser, other_user: StudyUser
+    ) -> None:
+        """Bulk creation for one user should never leak into another user's view."""
+        api_client.force_authenticate(user=test_user)
+        for i in range(10):
+            api_client.post(
+                "/api/create_task/",
+                {"name": f"Task {i}", "reward": 1, "due_date": "2029-12-31"},
+                format="json",
+            )
+
+        api_client.force_authenticate(user=other_user)
+        response = api_client.get("/api/get_task/")
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data == []
+
+    def test_task_reward_values_are_isolated_between_users(
+        self, api_client: APIClient, test_user: StudyUser, other_user: StudyUser
+    ) -> None:
+        """Confirm reward/money fields on tasks aren't cross-contaminated between users' tasks."""
+        Task.objects.create(name="Cheap", reward=1, due_date="2029-12-31", user=test_user)
+        Task.objects.create(name="Expensive", reward=1000, due_date="2029-12-31", user=other_user)
+
+        api_client.force_authenticate(user=test_user)
+        response = api_client.get("/api/get_task/")
+
+        assert response.status_code == status.HTTP_200_OK
+        assert len(response.data) == 1
+        assert response.data[0]["reward"] == 1
+
+    def test_get_task_only_returns_own_tasks(
+        self, api_client: APIClient, test_user: StudyUser, other_user: StudyUser
+    ) -> None:
+        """Create tasks interleaved between two users, confirm isolation without relying on IDs."""
+        api_client.force_authenticate(user=test_user)
+        api_client.post(
+            "/api/create_task/", {"name": "A", "reward": 1, "due_date": "2029-12-31"}, format="json"
+        )
+
+        api_client.force_authenticate(user=other_user)
+        api_client.post(
+            "/api/create_task/", {"name": "B", "reward": 1, "due_date": "2029-12-31"}, format="json"
+        )
+
+        api_client.force_authenticate(user=test_user)
+        response = api_client.get("/api/get_task/")
+        names = [t["name"] for t in response.data]
+
+        assert "A" in names
+        assert "B" not in names
+
 
 # Test Graveyard for tests that get generated but aren't useful *yet*
 
@@ -663,3 +792,61 @@ class TestTaskIsolation:
 #     test_user.delete()
 
 #     assert not Task.objects.filter(name="Cascade Task").exists()
+
+# Isolation Tests! (might need to make a second class)
+
+# def test_user_cannot_delete_another_users_task(
+#         self, api_client: APIClient, test_user: StudyUser, other_user: StudyUser
+#     ) -> None:
+#         """A user should not be able to delete a task they don't own."""
+#         task = Task.objects.create(
+#             name="Other's Task", reward=10, due_date="2029-12-31", user=other_user
+#         )
+
+#         api_client.force_authenticate(user=test_user)
+#         response = api_client.delete(f"/api/delete_task/{task.id}/")
+
+#         assert response.status_code in (status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND)
+#         assert Task.objects.filter(id=task.id).exists()
+
+# def test_user_cannot_update_another_users_task(
+#     self, api_client: APIClient, test_user: StudyUser, other_user: StudyUser
+# ) -> None:
+#     """A user should not be able to modify a task they don't own."""
+#     task = Task.objects.create(
+#         name="Original Name", reward=10, due_date="2029-12-31", user=other_user
+#     )
+
+#     api_client.force_authenticate(user=test_user)
+#     response = api_client.patch(
+#         f"/api/update_task/{task.id}/", {"name": "Hacked Name"}, format="json"
+#     )
+
+#     assert response.status_code in (status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND)
+#     task.refresh_from_db()
+#     assert task.name == "Original Name"
+
+# def test_deleting_one_user_does_not_affect_other_users_tasks(
+#     self, api_client: APIClient, test_user: StudyUser, other_user: StudyUser
+# ) -> None:
+#     """Cascade delete should only remove the deleted user's own tasks."""
+#     Task.objects.create(name="Mine", reward=10, due_date="2029-12-31", user=test_user)
+#     Task.objects.create(name="Theirs", reward=10, due_date="2029-12-31", user=other_user)
+
+#     test_user.delete()
+
+#     assert not Task.objects.filter(name="Mine").exists()
+#     assert Task.objects.filter(name="Theirs").exists()
+
+# def test_same_task_name_allowed_across_different_users(
+#     self, api_client: APIClient, test_user: StudyUser, other_user: StudyUser
+# ) -> None:
+#     """Task names aren't globally unique — two users can each have a task with the same name."""
+#     Task.objects.create(name="Homework", reward=10, due_date="2029-12-31", user=test_user)
+#     Task.objects.create(name="Homework", reward=20, due_date="2029-12-31", user=other_user)
+
+#     assert Task.objects.filter(name="Homework").count() == 2
+#     mine = Task.objects.get(name="Homework", user=test_user)
+#     theirs = Task.objects.get(name="Homework", user=other_user)
+#     assert mine.id != theirs.id
+#     assert mine.reward != theirs.reward
