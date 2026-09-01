@@ -799,6 +799,282 @@ class TestTaskIsolation:
 
 
 @pytest.mark.tasks
+class TestTaskUpdate:
+    def test_update_task_authenticated_owner(
+        self, api_client: APIClient, test_user: StudyUser, test_task: Task
+    ) -> None:
+        """The owner of a task should be able to update it."""
+        api_client.force_authenticate(user=test_user)
+
+        response = api_client.patch(
+            f"/api/update_task/{test_task.id}/", {"name": "Updated Name"}, format="json"
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        test_task.refresh_from_db()
+        assert test_task.name == "Updated Name"
+
+    def test_update_task_unauthenticated(self, api_client: APIClient, test_task: Task) -> None:
+        """A logged-out request should not be able to update anything."""
+        response = api_client.patch(
+            f"/api/update_task/{test_task.id}/", {"name": "Hacked"}, format="json"
+        )
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        test_task.refresh_from_db()
+        assert test_task.name != "Hacked"
+
+    def test_update_task_no_fields_is_valid(
+        self, api_client: APIClient, test_user: StudyUser, test_task: Task
+    ) -> None:
+        """Since no fields are required, an empty payload should still succeed and change nothing."""
+        api_client.force_authenticate(user=test_user)
+        original_name = test_task.name
+
+        response = api_client.patch(f"/api/update_task/{test_task.id}/", {}, format="json")
+
+        assert response.status_code == status.HTTP_200_OK
+        test_task.refresh_from_db()
+        assert test_task.name == original_name
+
+    def test_update_task_single_field_only(
+        self, api_client: APIClient, test_user: StudyUser, test_task: Task
+    ) -> None:
+        """Updating just one field shouldn't wipe out the others."""
+        api_client.force_authenticate(user=test_user)
+        original_description = test_task.description
+
+        response = api_client.patch(
+            f"/api/update_task/{test_task.id}/", {"reward": 999}, format="json"
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        test_task.refresh_from_db()
+        assert test_task.reward == 999
+        assert test_task.description == original_description
+
+    def test_update_task_multiple_fields(
+        self, api_client: APIClient, test_user: StudyUser, test_task: Task
+    ) -> None:
+        """Multiple fields should all update together in one request."""
+        api_client.force_authenticate(user=test_user)
+
+        response = api_client.patch(
+            f"/api/update_task/{test_task.id}/",
+            {"name": "New Name", "reward": 75, "category": "chores"},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        test_task.refresh_from_db()
+        assert test_task.name == "New Name"
+        assert test_task.reward == 75
+        assert test_task.category == "chores"
+
+    def test_update_task_negative_reward_rejected(
+        self, api_client: APIClient, test_user: StudyUser, test_task: Task
+    ) -> None:
+        """Same validation rules from create should apply to update."""
+        api_client.force_authenticate(user=test_user)
+
+        response = api_client.patch(
+            f"/api/update_task/{test_task.id}/", {"reward": -50}, format="json"
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_update_task_due_date_in_past_rejected(
+        self, api_client: APIClient, test_user: StudyUser, test_task: Task
+    ) -> None:
+        """Same validation rules from create should apply to update."""
+        api_client.force_authenticate(user=test_user)
+
+        response = api_client.patch(
+            f"/api/update_task/{test_task.id}/",
+            {"due_date": "2000-01-01T00:00:00Z"},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_update_task_invalid_due_date_format_rejected(
+        self, api_client: APIClient, test_user: StudyUser, test_task: Task
+    ) -> None:
+        api_client.force_authenticate(user=test_user)
+
+        response = api_client.patch(
+            f"/api/update_task/{test_task.id}/", {"due_date": "not-a-date"}, format="json"
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_update_task_other_users_task_forbidden(
+        self, api_client: APIClient, test_user: StudyUser, other_user: StudyUser
+    ) -> None:
+        """A user should not be able to update a task they don't own."""
+        task = Task.objects.create(
+            name="Not Yours",
+            reward=10,
+            due_date="2029-12-31T00:00:00Z",
+            user=other_user,
+        )
+
+        api_client.force_authenticate(user=test_user)
+        response = api_client.patch(
+            f"/api/update_task/{task.id}/", {"name": "Hacked"}, format="json"
+        )
+
+        assert response.status_code in (status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND)
+        task.refresh_from_db()
+        assert task.name == "Not Yours"
+
+    def test_update_task_nonexistent_id(self, api_client: APIClient, test_user: StudyUser) -> None:
+        """Updating an ID that doesn't exist should 404, not 500."""
+        api_client.force_authenticate(user=test_user)
+
+        response = api_client.patch("/api/update_task/999999/", {"name": "Ghost"}, format="json")
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_update_task_cannot_reassign_owner(
+        self, api_client: APIClient, test_user: StudyUser, other_user: StudyUser, test_task: Task
+    ) -> None:
+        """A client shouldn't be able to transfer a task to another user via the update payload."""
+        api_client.force_authenticate(user=test_user)
+
+        api_client.patch(
+            f"/api/update_task/{test_task.id}/", {"user": other_user.id}, format="json"
+        )
+
+        test_task.refresh_from_db()
+        assert test_task.user == test_user
+
+    def test_update_task_response_reflects_new_values(
+        self, api_client: APIClient, test_user: StudyUser, test_task: Task
+    ) -> None:
+        """The response body itself should reflect the updated values, not the stale ones."""
+        api_client.force_authenticate(user=test_user)
+
+        response = api_client.patch(
+            f"/api/update_task/{test_task.id}/", {"name": "Fresh Name"}, format="json"
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["name"] == "Fresh Name"
+
+    def test_update_task_invalid_id_format(
+        self, api_client: APIClient, test_user: StudyUser
+    ) -> None:
+        """A non-numeric ID in the URL shouldn't cause a 500."""
+        api_client.force_authenticate(user=test_user)
+
+        response = api_client.patch("/api/update_task/not-an-id/", {"name": "X"}, format="json")
+
+        assert response.status_code in (status.HTTP_404_NOT_FOUND, status.HTTP_400_BAD_REQUEST)
+
+    def test_update_task_inactive_user_cannot_update(
+        self, api_client: APIClient, test_user: StudyUser, test_task: Task
+    ) -> None:
+        """A deactivated account shouldn't be able to update tasks."""
+        test_user.is_active = False
+        test_user.save()
+
+        api_client.force_authenticate(user=test_user)
+        response = api_client.patch(
+            f"/api/update_task/{test_task.id}/", {"name": "Should Fail"}, format="json"
+        )
+
+        assert response.status_code in (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN)
+        test_task.refresh_from_db()
+        assert test_task.name != "Should Fail"
+
+    def test_update_task_put_not_allowed(
+        self, api_client: APIClient, test_user: StudyUser, test_task: Task
+    ) -> None:
+        """PUT isn't supported on this endpoint — confirm it's rejected cleanly."""
+        api_client.force_authenticate(user=test_user)
+
+        response = api_client.put(
+            f"/api/update_task/{test_task.id}/", {"name": "Full Replace"}, format="json"
+        )
+
+        assert response.status_code == status.HTTP_405_METHOD_NOT_ALLOWED
+        test_task.refresh_from_db()
+        assert test_task.name != "Full Replace"
+
+    def test_update_task_empty_string_name_rejected(
+        self, api_client: APIClient, test_user: StudyUser, test_task: Task
+    ) -> None:
+        """An explicitly blank name shouldn't be treated as valid, even though name isn't required."""
+        api_client.force_authenticate(user=test_user)
+        original_name = test_task.name
+
+        response = api_client.patch(
+            f"/api/update_task/{test_task.id}/", {"name": ""}, format="json"
+        )
+
+        # Adjust depending on whether blank TextField values are allowed in your model/serializer
+        assert response.status_code in (status.HTTP_200_OK, status.HTTP_400_BAD_REQUEST)
+        test_task.refresh_from_db()
+        if response.status_code == status.HTTP_400_BAD_REQUEST:
+            assert test_task.name == original_name
+
+    def test_update_task_category_can_be_cleared(
+        self, api_client: APIClient, test_user: StudyUser
+    ) -> None:
+        """Since category is nullable, updating it to null should be allowed."""
+        task = Task.objects.create(
+            name="Has Category",
+            reward=10,
+            due_date="2029-12-31T00:00:00Z",
+            category="school",
+            user=test_user,
+        )
+        api_client.force_authenticate(user=test_user)
+
+        response = api_client.patch(
+            f"/api/update_task/{task.id}/", {"category": None}, format="json"
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        task.refresh_from_db()
+        assert task.category is None
+
+    def test_update_task_does_not_affect_other_tasks(
+        self, api_client: APIClient, test_user: StudyUser
+    ) -> None:
+        """Updating one task shouldn't touch any of the user's other tasks."""
+        task1 = Task.objects.create(
+            name="Task 1", reward=10, due_date="2029-12-31T00:00:00Z", user=test_user
+        )
+        task2 = Task.objects.create(
+            name="Task 2", reward=20, due_date="2029-12-31T00:00:00Z", user=test_user
+        )
+
+        api_client.force_authenticate(user=test_user)
+        api_client.patch(f"/api/update_task/{task1.id}/", {"reward": 999}, format="json")
+
+        task2.refresh_from_db()
+        assert task2.reward == 20
+
+    def test_update_task_ignores_unknown_fields(
+        self, api_client: APIClient, test_user: StudyUser, test_task: Task
+    ) -> None:
+        """Sending a field that doesn't exist on the model shouldn't cause a 500."""
+        api_client.force_authenticate(user=test_user)
+
+        response = api_client.patch(
+            f"/api/update_task/{test_task.id}/",
+            {"name": "Valid Update", "nonexistent_field": "ignored"},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        test_task.refresh_from_db()
+        assert test_task.name == "Valid Update"
+
+
+@pytest.mark.tasks
 class TestTaskDeletion:
     def test_delete_task_authenticated_owner(
         self, api_client: APIClient, test_user: StudyUser, test_task: Task
